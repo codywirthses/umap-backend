@@ -2,13 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from typing import Optional
 import os
 from dotenv import load_dotenv
-import io
-import requests
-from PIL import Image
 
 from database import get_db, create_tables, User
 from auth import (
@@ -123,33 +120,6 @@ def verify_token(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "permissions": current_user.permissions
     }
-
-@app.get("/molecule")
-async def get_molecule_visualization(smiles: str, current_user: User = Depends(get_current_user)):
-    """
-    Generate a molecule visualization from a SMILES string.
-    This endpoint requires authentication.
-    """
-    try:
-        # For demonstration, using the RDKit online service as a simple external API
-        # In production, you would likely have your own molecule rendering service or library
-        url = f"https://rdkit.org/mol/svg/{smiles}"
-        response = requests.get(url)
-        
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to generate molecule image"
-            )
-        
-        # Return the image as SVG
-        return Response(content=response.content, media_type="image/svg+xml")
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing molecule: {str(e)}"
-        )
 
 if __name__ == "__main__":
     import uvicorn
