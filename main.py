@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Form
+from fastapi import FastAPI, Depends, HTTPException, status, Form, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 import os
 from dotenv import load_dotenv
+from io import BytesIO
 
+# Database and authentication modules
 from database import get_db, create_tables, User
 from auth import (
     get_password_hash, 
@@ -16,23 +18,34 @@ from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
+# RDKit for molecule drawing
+from rdkit import Chem
+from rdkit.Chem import Draw
+
 # Load environment variables
 load_dotenv()
 
 # Initialize the database
 create_tables()
 
+# Create FastAPI app instance
 app = FastAPI()
 
-# Configure CORS
+# Configure CORS middleware
+# Allow origins from both environment variables (if provided), otherwise default to localhost:3000
+allowed_origins = list(set([
+    os.getenv("FRONTEND_URL", "http://localhost:3000"),
+    os.getenv("CORS_ORIGIN", "http://localhost:3000")
+]))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],  # Get from env or use default
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Authentication endpoints
 @app.post("/register")
 def register_user(
     username: str = Form(...),
@@ -121,7 +134,30 @@ def verify_token(current_user: User = Depends(get_current_user)):
         "permissions": current_user.permissions
     }
 
+# Molecule endpoint
+@app.get("/molecule")
+async def get_molecule(smiles: str = Query(..., title="SMILES String")):
+    """Generate a molecular drawing from a SMILES string."""
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return {"error": "Invalid SMILES string"}
+
+        # Generate molecular image
+        img = Draw.MolToImage(mol)
+
+        # Convert image to bytes
+        img_bytes = BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+
+        return Response(content=img_bytes.getvalue(), media_type="image/png")
+
+    except Exception as e:
+        return {"error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8001))  # Get port from env or use 8001 as default
-    uvicorn.run(app, host="0.0.0.0", port=port) 
+    # Use PORT from environment or default to 8000
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
