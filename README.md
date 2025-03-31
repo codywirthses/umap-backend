@@ -5,7 +5,8 @@ This is a simple FastAPI backend for user authentication with SQLite database fo
 ## Setup
 
 1. Make sure you have Python 3.7+ installed
-2. Install dependencies:
+2. Node.js version v22.14.0 is recommended for frontend compatibility
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
