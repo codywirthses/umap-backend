@@ -31,9 +31,6 @@ The server will start at http://localhost:8000 by default (configurable in .env)
 The following environment variables can be configured in the `.env` file:
 
 ```
-# Backend server configuration
-PORT=8000                     # The port to run the server on
-FRONTEND_URL=http://localhost:3000  # The URL of the frontend for CORS
 
 # Database
 DATABASE_URL=sqlite:///./users.db   # SQLite database location
