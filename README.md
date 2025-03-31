@@ -31,14 +31,24 @@ The server will start at http://localhost:8000 by default (configurable in .env)
 The following environment variables can be configured in the `.env` file:
 
 ```
-
 # Database
 DATABASE_URL=sqlite:///./users.db   # SQLite database location
+MONGO_URI=mongodb://localhost:27017 # MongoDB connection string for feedback storage
 
 # JWT Authentication
 SECRET_KEY=your_secret_key          # Secret key for JWT token generation
 ALGORITHM=HS256                     # Algorithm used for JWT
 ACCESS_TOKEN_EXPIRE_MINUTES=30      # Token expiration time in minutes
+
+# Server Configuration
+FRONTEND_URL=http://localhost:3000  # Frontend URL for CORS
+CORS_ORIGIN=http://localhost:3000   # CORS origin
+
+# External Services
+OPENAI_API_KEY=your_openai_key      # OpenAI API key for o3-mini model
+HF_API_KEY=your_huggingface_key     # HuggingFace API key
+TAVILY_API_KEY=your_tavily_key      # Tavily API key for web search
+PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 ```
 
 ## API Endpoints
