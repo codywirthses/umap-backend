@@ -24,7 +24,7 @@ or
 uvicorn main:app --reload
 ```
 
-The server will start at http://localhost:8001 by default (configurable in .env)
+The server will start at http://localhost:8000 by default (configurable in .env)
 
 ## Environment Variables
 
@@ -32,7 +32,7 @@ The following environment variables can be configured in the `.env` file:
 
 ```
 # Backend server configuration
-PORT=8001                           # The port to run the server on
+PORT=8000                     # The port to run the server on
 FRONTEND_URL=http://localhost:3000  # The URL of the frontend for CORS
 
 # Database
