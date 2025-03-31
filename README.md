@@ -43,10 +43,20 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30      # Token expiration time in minutes
 
 ## API Endpoints
 
+### Authentication Endpoints
 - `POST /register` - Register a new user
 - `POST /login` - Login an existing user
 - `GET /users/me` - Get current user information
 - `GET /verify-token` - Verify JWT token validity
+
+### RAG (Retrieval Augmented Generation) Endpoints
+- `POST /rag` - Query the LLM with context from database and/or web search
+
+### Molecule Related Endpoints
+- `GET /molecule` - Generate a molecular drawing from a SMILES string
+
+### Feedback Endpoints
+- `POST /api/feedback` - Save user feedback on responses
 
 ## Database
 
