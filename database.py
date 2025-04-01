@@ -23,7 +23,7 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    permissions = Column(String, default="basic")  # basic, premium, admin
+    permissions = Column(String, default="research")  # research, premium, admin
 
 def create_tables():
     Base.metadata.create_all(bind=engine)

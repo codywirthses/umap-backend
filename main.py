@@ -362,7 +362,7 @@ def register_user(
         username=username,
         email=email,
         hashed_password=hashed_password,
-        permissions="basic"  # Default permission
+        permissions="research"  # Default permission
     )
     db.add(new_user)
     db.commit()

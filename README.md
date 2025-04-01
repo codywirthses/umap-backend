@@ -80,7 +80,7 @@ Table: `users`
 - `username` (String, Unique)
 - `email` (String, Unique)
 - `hashed_password` (String)
-- `permissions` (String, Default: "basic")
+- `permissions` (String, Default: "research")
 
 ### Querying the Database
 
@@ -112,11 +112,11 @@ DELETE FROM users WHERE username = 'your_username';
 ## Permission Levels
 
 The application supports the following permission levels:
-- `basic`: Regular user access
+- `research`: Regular user access
 - `premium`: Premium features access
 - `admin`: Administrative access
 
-By default, all new users are assigned the `basic` permission level.
+By default, all new users are assigned the `research` permission level.
 
 ## Security Notes
 
