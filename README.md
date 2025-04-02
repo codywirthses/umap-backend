@@ -81,6 +81,13 @@ PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 - `GET /users/me` - Get current user information
 - `GET /verify-token` - Verify JWT token validity
 
+### Query Limit Endpoints
+- `GET /query_limit` - Get the current user's query limit
+- `POST /query_limit_update` - Decrement the user's query limit by 1
+- `POST /admin/reset_query_limits` - Admin endpoint to reset all users' query limits to 10
+- `GET /debug/reset_query_limits` - Debug endpoint to manually reset all query limits
+- `GET /debug/scheduler_jobs` - Debug endpoint to view scheduled query limit reset jobs
+
 ### RAG (Retrieval Augmented Generation) Endpoints
 - `POST /rag` - Query the LLM with context from database and/or web search
 
@@ -102,6 +109,17 @@ Table: `users`
 - `email` (String, Unique)
 - `hashed_password` (String)
 - `permissions` (String, Default: "research")
+- `query_limit` (Integer, Default: 10)
+- `created_at` (DateTime, Default: current UTC time)
+
+### Query Limit System
+
+The application implements a query limit system:
+- Each user has a `query_limit` field (default: 10)
+- The query limit decreases by 1 for each query to the RAG system
+- Query limits are automatically reset to 10 every 30 days from the user's creation date
+- The reset schedule is managed by an APScheduler background scheduler
+- Admin users can manually reset all user query limits using the admin endpoint
 
 ### Querying the Database
 
@@ -125,6 +143,15 @@ SELECT * FROM users WHERE username = 'your_username';
 
 # Update user permissions
 UPDATE users SET permissions = 'admin' WHERE username = 'your_username';
+
+# Update a user's query limit
+UPDATE users SET query_limit = 10 WHERE username = 'your_username';
+
+# Check users with exhausted query limits
+SELECT id, username, query_limit FROM users WHERE query_limit = 0;
+
+# View all users' query limits and creation dates
+SELECT id, username, query_limit, created_at FROM users;
 
 # Delete a user
 DELETE FROM users WHERE username = 'your_username';
