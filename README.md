@@ -85,8 +85,6 @@ PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 - `GET /query_limit` - Get the current user's query limit
 - `POST /query_limit_update` - Decrement the user's query limit by 1
 - `POST /admin/reset_query_limits` - Admin endpoint to reset all users' query limits to 10
-- `GET /debug/reset_query_limits` - Debug endpoint to manually reset all query limits
-- `GET /debug/scheduler_jobs` - Debug endpoint to view scheduled query limit reset jobs
 
 ### RAG (Retrieval Augmented Generation) Endpoints
 - `POST /rag` - Query the LLM with context from database and/or web search
