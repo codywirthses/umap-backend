@@ -362,7 +362,8 @@ def register_user(
         username=username,
         email=email,
         hashed_password=hashed_password,
-        permissions="research"  # Default permission
+        permissions="research",  # Default permission
+        query_limit=10  # Set query limit to 10
     )
     db.add(new_user)
     db.commit()
@@ -376,7 +377,8 @@ def register_user(
         "token_type": "bearer",
         "username": new_user.username,
         "email": new_user.email,
-        "permissions": new_user.permissions
+        "permissions": new_user.permissions,
+        "query_limit": new_user.query_limit
     }
 
 @app.post("/login")
@@ -401,7 +403,8 @@ def login(
         "token_type": "bearer",
         "username": user.username,
         "email": user.email,
-        "permissions": user.permissions
+        "permissions": user.permissions,
+        "query_limit": user.query_limit
     }
 
 @app.get("/users/me")
@@ -409,7 +412,8 @@ def read_users_me(current_user: User = Depends(get_current_user)):
     return {
         "username": current_user.username,
         "email": current_user.email,
-        "permissions": current_user.permissions
+        "permissions": current_user.permissions,
+        "query_limit": current_user.query_limit
     }
 
 @app.get("/verify-token")
@@ -417,7 +421,41 @@ def verify_token(current_user: User = Depends(get_current_user)):
     return {
         "valid": True,
         "username": current_user.username,
-        "permissions": current_user.permissions
+        "permissions": current_user.permissions,
+        "query_limit": current_user.query_limit
+    }
+
+@app.get("/query_limit")
+def get_query_limit(current_user: User = Depends(get_current_user)):
+    """
+    Returns the current user's query limit.
+    """
+    return {
+        "username": current_user.username,
+        "query_limit": current_user.query_limit
+    }
+
+@app.post("/query_limit_update")
+def update_query_limit(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Decrements the user's query limit by 1 and updates it in the database.
+    """
+    if current_user.query_limit <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query limit already at minimum"
+        )
+    
+    # Decrement the query limit
+    current_user.query_limit -= 1
+    
+    # Update in database
+    db.commit()
+    
+    return {
+        "username": current_user.username,
+        "query_limit": current_user.query_limit,
+        "message": "Query limit decremented successfully"
     }
 
 @app.get("/molecule")

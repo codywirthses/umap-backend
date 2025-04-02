@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -34,6 +34,11 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     permissions = Column(String, default="research")  # research, premium, admin
+    query_limit = Column(Integer, default=10)
+    
+    __table_args__ = (
+        CheckConstraint('query_limit >= 0 AND query_limit <= 10', name='check_query_limit_range'),
+    )
 
 def create_tables():
     try:
