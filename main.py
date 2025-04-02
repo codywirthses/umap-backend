@@ -1,7 +1,9 @@
+import base64
 import os
 import re
 from io import BytesIO
 from datetime import timedelta
+import traceback
 from typing import Optional
 
 import httpx
@@ -13,18 +15,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-# --- External LLM, Retrieval, and DB Clients (from first file) ---
-from huggingface_hub import login
-from pinecone import Pinecone, ServerlessSpec
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import DirectoryLoader, JSONLoader
-from tavily import TavilyClient
 from pymongo import MongoClient
-from openai import OpenAI
+
+# --- Snowflake Client ---
+from snowflake.snowpark import Session as SnowflakeSession
 
 # --- RDKit for molecule drawing (from second file) ---
 from rdkit import Chem
 from rdkit.Chem import Draw
+
+load_dotenv()
 
 # --- Authentication and Database modules (from second file) ---
 from database import get_db, create_tables, User
@@ -36,205 +36,27 @@ from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
-# Load environment variables
-load_dotenv()
+from rag import retrieve_context
+from chat import query_llm, extract_molecule_names
+from util import get_smiles, smiles_to_image, replace_greek_letters
 
-# --- Setup for External Services (RAG, LLM, etc.) ---
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+snowflake_auth = {
+    "account": "SESAI-MAIN",
+    "user": os.getenv("SNOWFLAKE_USER"),
+    "authenticator": "externalbrowser",
+    "role": os.getenv("SNOWFLAKE_ROLE"),
+    "warehouse": "MATERIAL_WH",
+    "database": "UMAP_DATA",
+    "schema": "PUBLIC"
+}
 
-NUM_LINKS_THRESH = 2
+snowflake_session = SnowflakeSession.builder.configs(snowflake_auth).create()
+
 
 # MongoDB setup for feedback
 MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = MongoClient(MONGO_URI)
 chat_db = mongo_client["chatApp"]
-
-ANSWER_OUTPUT_LENGTH = 1024  # Maximum number of tokens to generate for the answer
-MAX_LOOPS = 2  # Maximum number of loops to run the LLM
-
-hf_api_keys = os.getenv("HF_API_KEY")
-login(hf_api_keys)
-
-tavily_api_key = os.getenv("TAVILY_API_KEY")
-tavily_client = TavilyClient(api_key=tavily_api_key)
-
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index_name = "ses-papers-textbooks-for-rag"
-index = pc.Index(index_name)
-print(index.describe_index_stats())
-
-# --- Utility Functions from the First File ---
-def hybrid_score_norm(dense, sparse, alpha: float):
-    """Hybrid score using a convex combination: alpha * dense + (1 - alpha) * sparse."""
-    if alpha < 0 or alpha > 1:
-        raise ValueError("Alpha must be between 0 and 1")
-    hs = {
-        'indices': sparse['indices'],
-        'values':  [v * (1 - alpha) for v in sparse['values']]
-    }
-    return [v * alpha for v in dense], hs
-
-def dense_sparse_vector(query):
-    de = pc.inference.embed(
-        model="multilingual-e5-large",
-        inputs=query,
-        parameters={"input_type": "passage", "truncate": "END"}
-    )    
-    se = pc.inference.embed(
-        model="pinecone-sparse-english-v0",
-        inputs=query,
-        parameters={"input_type": "passage", "return_tokens": True}
-    )
-    return de[0]['values'], {'indices': se[0]['sparse_indices'], 'values': se[0]['sparse_values']}
-
-def retrieve_context(query, top_k_chunks, rag_enabled: bool, web_search_enabled: bool, web_search_client: str):
-    context = ""
-    sources = []
-    
-    if web_search_enabled:
-        if web_search_client == "Tavily":
-            tavily_response = tavily_client.search(
-                query=query,
-                search_depth="advanced",
-                max_results=3,
-                include_answer=True, 
-                include_raw_content=True,
-                include_images=False
-            )
-            if tavily_response.get("answer"):
-                context += f"Web search result: {tavily_response['answer']}\n\n"
-                for result in tavily_response["results"]:
-                    title = result["title"]
-                    url = result["url"]
-                    sources.append(f'- <a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>')
-        elif web_search_client == "OpenAI":
-            completion = openai_client.chat.completions.create(
-                model="gpt-4o-mini-search-preview",
-                messages=[{"role": "user", "content": query}],
-            )
-            openai_response = completion.choices[0].message.content
-            links = re.findall(r'\(\[([^\]]+)\]\(([^)]+)\)\)', openai_response)
-            if len(links) >= NUM_LINKS_THRESH:
-                for text, url in links:
-                    url_split = url.split("?utm_source=openai")[0]
-                    sources.append(f"- {text}: {url_split}")
-                context += f"Web search result: {openai_response}\n\n"
-    
-    if rag_enabled:
-        query_payload = {
-            "inputs": {"text": f"{query}"},
-            "top_k": top_k_chunks
-        }
-        results = index.search(namespace="ses_rag", query=query_payload)
-        for i, hit in enumerate(results['result']['hits']):
-            context_text = hit['fields']['context']
-            full_source = hit['fields']['source'].split("/")[-1].split(".jsonl")[0]
-            citation = ""
-            print(full_source)
-            if full_source[-2:] == "-0":
-                doi = full_source[:-2].replace("_", "/")
-                try:
-                    headers = {"Accept": "text/x-bibliography; style=apa"}
-                    response = httpx.get(f"https://doi.org/{doi}", headers=headers, follow_redirects=True)
-                    if response.status_code == 200:
-                        citation = response.text.strip().split("https://doi.org")[0]
-                        source_text = f'{citation} <a href="https://doi.org/{doi}" target="_blank" rel="noopener noreferrer">https://doi.org/{doi}</a>'
-                    else:
-                        source_text = f"DOI: {doi}"
-                except Exception as e:
-                    source_text = f"DOI: {doi}"
-            else:
-                pattern = "(z-lib"
-                idx = full_source.lower().find(pattern)
-                if idx != -1:
-                    source_text = full_source[:idx]
-                else:
-                    source_text = full_source
-                citation = source_text
-
-            if citation:
-                context += f"Database result {i+1}, from {citation}: {context_text}\n\n"
-            else:
-                context += f"Database result {i+1}: {context_text}\n\n"
-            sources.append("- " + source_text)
-    
-    # Remove duplicate sources while preserving order
-    sources = list(dict.fromkeys(sources))
-    sources = "\n".join(sources)
-    return context, sources
-
-async def query_llm(prompt: str, model: str, max_output_len: int = 1024) -> str:
-    """
-    Query the LLM inference server with the given prompt.
-    For model "o3-mini", it uses OpenAI's chat API; for "OmniScience" it uses a local inference URL.
-    """
-    if model == "o3-mini":
-        final_response = openai_client.chat.completions.create(
-            model="o3-mini",
-            reasoning_effort="high",
-            messages=[{"role": "user", "content": prompt}],
-        ).choices[0].message.content
-    elif model == "OmniScience":
-        inference_url = "http://localhost:8800/v2/models/llama/infer"
-        final_response = ""
-        current_prompt = prompt
-        count = 0
-
-        while True:
-            length = max_output_len if count == 0 else ANSWER_OUTPUT_LENGTH
-            payload = {
-                "inputs": [
-                    {
-                        "name": "prompts",
-                        "shape": [1, 1],
-                        "datatype": "BYTES",
-                        "data": [[current_prompt]]
-                    },
-                    {
-                        "name": "max_output_len",
-                        "shape": [1, 1],
-                        "datatype": "INT64",
-                        "data": [[length]]
-                    },
-                    {
-                        "name": "output_generation_logits",
-                        "shape": [1, 1],
-                        "datatype": "BOOL",
-                        "data": [[False]]
-                    }
-                ],
-                "outputs": [{"name": "outputs"}]
-            }
-
-            async with httpx.AsyncClient(timeout=300) as client:
-                response = await client.post(inference_url, json=payload)
-            
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code,
-                                    detail=f"LLM query failed: {response.text}")
-
-            result = response.json()
-            try:
-                new_output = result["outputs"][0]["data"][0]
-            except (KeyError, IndexError):
-                raise HTTPException(status_code=500, detail="LLM query returned no output")
-
-            final_response += new_output
-
-            if "<|eot_id|>" in final_response:
-                final_response = final_response.replace("<|eot_id|>", "")
-                break
-
-            if "<|start_header_id|>answer" not in new_output and count == 0:
-                final_response += "\n<|start_header_id|>answer\n"
-
-            current_prompt = prompt + "\n" + final_response
-            count += 1
-            if count >= MAX_LOOPS:
-                break
-    else:
-        raise HTTPException(status_code=400, detail="Invalid model specified")
-    return final_response
 
 # --- Initialize SQLAlchemy Database ---
 create_tables()
@@ -297,12 +119,10 @@ async def handle_rag(query_req: RagRequest):
     rag_enabled = query_req.ragEnabled
     web_search_enabled = query_req.webSearchEnabled
     web_search_client = query_req.webSearchClient
-    model = query_req.model  # either "OmniScience" or "o3-mini"
-    
-    # Retrieve context from database and/or web search
-    context, sources = retrieve_context(query, 3, rag_enabled, web_search_enabled, web_search_client)
-    
-    # Construct the prompt by combining the query with the retrieved context
+    model = query_req.model  # either OmniScience or o3-mini
+    # Run retrieval based on the enabled options
+    context, sources = await retrieve_context(query, 3, rag_enabled, web_search_enabled, web_search_client)
+    # Construct the prompt by combining the query and retrieval results
     initial_prompt = f"{query}"
     extended_prompt = ""
     if rag_enabled or web_search_enabled:
@@ -325,20 +145,29 @@ async def handle_rag(query_req: RagRequest):
                 if rag_enabled:
                     extended_prompt += " and"
                 extended_prompt += " internet"
-            extended_prompt += " search results you might find useful when answering the query:\n"
+            extended_prompt += " database search results you might find useful when answering the query:\n"
             extended_prompt += context
-            extended_prompt += "These results may or may not be relevant. Think about which parts of this information are useful to answer the query."
+            extended_prompt += "These results may or may not be relevant. "
+            extended_prompt += "Think about which parts of this information are useful to answer the query. "
+            extended_prompt += "If you name specific molecules in your response, make sure to state the full molecule name before using any abbreviations.\n"
     prompt = initial_prompt + extended_prompt
-    
-    # Query the LLM with the combined prompt
+    # Query your LLM with the combined prompt
     llm_response = await query_llm(prompt, model, max_output_length)
     if not llm_response:
         raise HTTPException(status_code=500, detail="LLM query failed")
     
+    # Extract molecule names from the LLM response
+    original_molecule_list = await extract_molecule_names(llm_response)
+    molecule_text = ""
+    if original_molecule_list:
+        molecule_text = "; ".join(original_molecule_list)
+    
+    processed_molecule_list = [replace_greek_letters(mol) for mol in original_molecule_list]
+
     if model == "OmniScience":
-        return {"outputs": extended_prompt + llm_response + "\n**Sources:**\n" + sources}
+        return {"outputs": extended_prompt + llm_response + "\n**Sources:**\n" + sources, "molecules": processed_molecule_list}
     else:
-        return {"outputs": llm_response + "<br><br><strong>Sources:</strong><br><br>" + sources}
+        return {"outputs": llm_response + "<br><br><strong>Sources:</strong><br><br>" + sources +"<br><br><strong>Detected molecules in LLM response:</strong><br><br>" + molecule_text, "molecules": processed_molecule_list}
 
 # --- Endpoints from the Second File (Authentication & Molecule) ---
 
@@ -420,22 +249,64 @@ def verify_token(current_user: User = Depends(get_current_user)):
         "permissions": current_user.permissions
     }
 
+@app.get("/api/find_smiles")
+async def find_smiles(molecule: str):
+    result = await get_smiles(molecule)
+    return result
+
 @app.get("/molecule")
 async def get_molecule(smiles: str = Query(..., title="SMILES String")):
     """
     Generate a molecular drawing from a SMILES string.
     """
     try:
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            return {"error": "Invalid SMILES string"}
-        img = Draw.MolToImage(mol)
-        img_bytes = BytesIO()
-        img.save(img_bytes, format="PNG")
-        img_bytes.seek(0)
-        return Response(content=img_bytes.getvalue(), media_type="image/png")
+        return Response(content=smiles_to_image(smiles), media_type="image/png")
     except Exception as e:
         return {"error": str(e)}
+    
+@app.get("/api/molecule_details")
+async def molecule_details(molecule: str):
+    """
+    Query the UMAP_DATA.PUBLIC.UMAP_1M_MOLECULAR table for the given molecule (by SMILES).
+    If found, return its properties and a base64-encoded image generated by smiles_to_image.
+    """
+    print(f"Searching for {molecule}...")
+    smiles = await get_smiles(molecule)
+    if not smiles or smiles["smiles"] == "Not found" or "Error" in smiles["smiles"]:
+        return {"found": False, "message": "Molecule not found"}
+
+    query = f'''
+        SELECT SMILE, 
+            ROUND(HOMO, 2) as HOMO,
+            ROUND(LUMO, 2) as LUMO,
+            ROUND(ESP_MAX, 2) as ESP_MAX,
+            ROUND(ESP_MIN, 2) as ESP_MIN,
+            CAST(ENERGY AS INT) as ENERGY
+        FROM UMAP_DATA.PUBLIC.UMAP_1M_MOLECULAR
+        WHERE SMILE = '{smiles["smiles"]}'
+        LIMIT 1
+    '''
+    print("Constructed query: ", query)
+    try:
+        result_df = snowflake_session.sql(query).to_pandas()
+        if result_df.empty:
+            print("Molecule not found.")
+            return {"found": False, "message": "Molecule not found"}
+        row = result_df.iloc[0].to_dict()
+        # Generate molecule image
+        image_data = smiles_to_image(row['SMILE'])
+        if image_data:
+            b64_image = base64.b64encode(image_data).decode('utf-8')
+            image_uri = f"data:image/png;base64,{b64_image}"
+        else:
+            image_uri = None
+        row['image'] = image_uri
+        row['name'] = molecule
+        return {"found": True, "molecule_details": row}
+    except Exception as e:
+        print("Error querying molecule details:", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error querying molecule details: {str(e)}")
+
 
 # --- Run the Combined Application ---
 if __name__ == "__main__":
