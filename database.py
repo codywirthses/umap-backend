@@ -2,17 +2,27 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+import logging
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./users.db")
+# PostgreSQL connection string
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/umap_db?sslmode=disable")
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+try:
+    logger.info(f"Connecting to database with URL: {SQLALCHEMY_DATABASE_URL}")
+    engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    logger.info("Database connection established successfully")
+except Exception as e:
+    logger.error(f"Error connecting to the database: {str(e)}")
+    raise
 
 Base = declarative_base()
 
@@ -26,11 +36,20 @@ class User(Base):
     permissions = Column(String, default="research")  # research, premium, admin
 
 def create_tables():
-    Base.metadata.create_all(bind=engine)
+    try:
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Tables created successfully")
+    except Exception as e:
+        logger.error(f"Error creating tables: {str(e)}")
+        raise
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception as e:
+        logger.error(f"Database session error: {str(e)}")
+        raise
     finally:
         db.close() 

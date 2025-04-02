@@ -1,6 +1,6 @@
 # UMAP App Backend Server
 
-This is a simple FastAPI backend for user authentication with SQLite database for the UMAP application.
+This is a FastAPI backend for user authentication with PostgreSQL database for the UMAP application.
 
 ## Setup
 
@@ -10,12 +10,32 @@ This is a simple FastAPI backend for user authentication with SQLite database fo
 pip install -r requirements.txt
 ```
 
-3. Configure environment variables (optional):
+3. Install and configure PostgreSQL:
+   - Install PostgreSQL on your system (if not already installed)
+   - Create a new database for the application:
+   ```bash
+   # Connect to PostgreSQL as superuser
+   sudo -u postgres psql
+   
+   # Create a new database
+   CREATE DATABASE umap_db;
+   
+   # Create a user (if needed)
+   CREATE USER postgres WITH PASSWORD 'password';
+   
+   # Grant privileges
+   GRANT ALL PRIVILEGES ON DATABASE umap_db TO postgres;
+   
+   # Exit PostgreSQL
+   \q
+   ```
+
+4. Configure environment variables:
    - The application uses a `.env` file in the server directory
-   - You can modify this file to change settings like the port, database URL, and JWT secret
+   - Update the `DATABASE_URL` in the .env file with your PostgreSQL connection details
    - Default values will be used if no .env file is found
 
-4. Run the server:
+5. Run the server:
 ```bash
 python main.py
 ```
@@ -32,7 +52,9 @@ The following environment variables can be configured in the `.env` file:
 
 ```
 # Database
-DATABASE_URL=sqlite:///./users.db   # SQLite database location
+DATABASE_URL=postgresql://postgres:password@localhost:5432/umap_db  # PostgreSQL connection string
+
+# MongoDB
 MONGO_URI=mongodb://localhost:27017 # MongoDB connection string for feedback storage
 
 # JWT Authentication
@@ -70,7 +92,7 @@ PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 
 ## Database
 
-The application uses SQLite database (`users.db`) to store user information.
+The application uses PostgreSQL to store user information.
 
 ### Database Schema
 
@@ -83,17 +105,17 @@ Table: `users`
 
 ### Querying the Database
 
-You can use SQLite CLI or any SQLite browser like DB Browser for SQLite to access the database:
+You can use the `psql` command line tool or a PostgreSQL GUI client like pgAdmin to access the database:
 
 ```bash
-# Open the database
-sqlite3 users.db
+# Connect to the database
+psql -U postgres -h localhost -d umap_db
 
 # List all tables
-.tables
+\dt
 
 # Show table schema
-.schema users
+\d users
 
 # Query all users
 SELECT * FROM users;
@@ -122,4 +144,6 @@ By default, all new users are assigned the `research` permission level.
 For production, make sure to:
 1. Change the `SECRET_KEY` in the `.env` file to a secure random string
 2. Configure proper CORS settings in the `.env` file
-3. Set up HTTPS for secure communication 
+3. Set up HTTPS for secure communication
+4. Use a strong password for your PostgreSQL user
+5. Configure PostgreSQL to only accept connections from trusted sources
