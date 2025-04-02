@@ -1,17 +1,20 @@
 import os
 import re
 from io import BytesIO
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Optional
+import asyncio
+import threading
 
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, status, Form, Query, Response
+from fastapi import FastAPI, Depends, HTTPException, status, Form, Query, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- External LLM, Retrieval, and DB Clients (from first file) ---
 from huggingface_hub import login
@@ -27,7 +30,7 @@ from rdkit import Chem
 from rdkit.Chem import Draw
 
 # --- Authentication and Database modules (from second file) ---
-from database import get_db, create_tables, User
+from database import get_db, create_tables, User, SessionLocal
 from auth import (
     get_password_hash, 
     authenticate_user, 
@@ -62,6 +65,31 @@ pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index_name = "ses-papers-textbooks-for-rag"
 index = pc.Index(index_name)
 print(index.describe_index_stats())
+
+# --- Scheduled Tasks ---
+def reset_query_limits():
+    """
+    Resets all users' query_limit to 10.
+    This function is scheduled to run every 30 days.
+    """
+    try:
+        # Need to create a new session for this background task
+        db = SessionLocal()
+        
+        # Update all users
+        result = db.execute("UPDATE users SET query_limit = 10")
+        db.commit()
+        
+        print(f"[{datetime.now()}] Successfully reset query limits for all users")
+    except Exception as e:
+        print(f"[{datetime.now()}] Error resetting query limits: {str(e)}")
+    finally:
+        db.close()
+
+# Set up the scheduler
+scheduler = BackgroundScheduler()
+scheduler.add_job(reset_query_limits, 'interval', days=30)
+scheduler.start()
 
 # --- Utility Functions from the First File ---
 def hybrid_score_norm(dense, sparse, alpha: float):
@@ -456,6 +484,27 @@ def update_query_limit(current_user: User = Depends(get_current_user), db: Sessi
         "username": current_user.username,
         "query_limit": current_user.query_limit,
         "message": "Query limit decremented successfully"
+    }
+
+@app.post("/admin/reset_query_limits")
+def admin_reset_query_limits(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Admin endpoint to manually reset all users' query limits to 10.
+    Only users with admin permissions can access this endpoint.
+    """
+    if current_user.permissions != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can reset query limits"
+        )
+    
+    # Update all users
+    result = db.execute("UPDATE users SET query_limit = 10")
+    db.commit()
+    
+    return {
+        "message": "Successfully reset query limits for all users",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/molecule")

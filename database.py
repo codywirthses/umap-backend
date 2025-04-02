@@ -1,8 +1,9 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, CheckConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, CheckConstraint, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 import logging
+import datetime
 from dotenv import load_dotenv
 
 # Configure logging
@@ -35,6 +36,7 @@ class User(Base):
     hashed_password = Column(String)
     permissions = Column(String, default="research")  # research, premium, admin
     query_limit = Column(Integer, default=10)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     __table_args__ = (
         CheckConstraint('query_limit >= 0 AND query_limit <= 10', name='check_query_limit_range'),
