@@ -66,6 +66,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30      # Token expiration time in minutes
 FRONTEND_URL=http://localhost:3000  # Frontend URL for CORS
 CORS_ORIGIN=http://localhost:3000   # CORS origin
 
+# Stripe Integration
+STRIPE_SECRET_KEY=your_stripe_secret_key      # Stripe secret key for payment processing
+STRIPE_WEBHOOK_SECRET=your_stripe_webhook_secret  # Secret for verifying Stripe webhook signatures
+
 # External Services
 OPENAI_API_KEY=your_openai_key      # OpenAI API key for o3-mini model
 HF_API_KEY=your_huggingface_key     # HuggingFace API key
@@ -88,6 +92,9 @@ PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 
 ### RAG (Retrieval Augmented Generation) Endpoints
 - `POST /rag` - Query the LLM with context from database and/or web search
+
+### Payments and Subscription Endpoints
+- `POST /webhook` - Stripe webhook endpoint for handling payment events (checkout completions, subscription changes)
 
 ### Molecule Related Endpoints
 - `GET /molecule` - Generate a molecular drawing from a SMILES string
