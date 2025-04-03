@@ -435,12 +435,10 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
                 
                 print(f"Generated username: {username}")
                 
-                # Generate a random temporary password
-                import secrets
-                import string
-                temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                # Use "password" as the default password
+                temp_password = "password"
                 
-                print("Generated temporary password")
+                print("Using default password: 'password'")
                 
                 # Get a database session
                 db = SessionLocal()
@@ -458,7 +456,7 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
                             username=username,
                             email=customer_email,
                             hashed_password=hashed_password,
-                            permissions="paid",  # Set to paid since they completed checkout
+                            permissions="professional",  # Set to paid since they completed checkout
                             query_limit=10  # Using maximum allowed by current constraint
                         )
                         db.add(new_user)
@@ -506,8 +504,8 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None))
                         alt_username = f"{alt_first_name.lower()}{alt_last_name.lower() if alt_last_name else ''}"
                         alt_username = re.sub(r'[^a-zA-Z0-9]', '', alt_username)
                         
-                        # Generate password
-                        alt_temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                        # Use "password" as the default password
+                        alt_temp_password = "password"
                         
                         # Register the user with alternative details
                         alt_db = SessionLocal()
