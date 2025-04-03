@@ -39,7 +39,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     __table_args__ = (
-        CheckConstraint('query_limit >= 0 AND query_limit <= 10', name='check_query_limit_range'),
+        CheckConstraint('query_limit >= 0 AND query_limit <= 100', name='users_query_limit_check'),
     )
 
 def create_tables():

@@ -9,7 +9,7 @@ import threading
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, status, Form, Query, Response, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, Form, Query, Response, BackgroundTasks, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -38,6 +38,11 @@ from auth import (
     get_current_user,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+
+import stripe
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 # Load environment variables
 load_dotenv()
@@ -369,6 +374,183 @@ async def handle_rag(query_req: RagRequest):
         return {"outputs": llm_response + "<br><br><strong>Sources:</strong><br><br>" + sources}
 
 # --- Endpoints from the Second File (Authentication & Molecule) ---
+
+@app.post("/webhook")
+async def stripe_webhook(request: Request, stripe_signature: str = Header(None)):
+    payload = await request.body()
+    
+    # Log raw payload for debugging
+    print("Webhook received - Raw payload length:", len(payload))
+    print("Raw payload content:", payload.decode('utf-8'))
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, stripe_signature, endpoint_secret
+        )
+    except ValueError as e:
+        # Invalid payload
+        print(f"Invalid payload error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except stripe.error.SignatureVerificationError as e:
+        # Invalid signature
+        print(f"Signature verification error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    # Log the event type
+    print(f"Processing webhook event type: {event['type']}")
+    
+    # Handle different event types
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        
+        # Debug: print the entire session object
+        print("Complete session object:", session)
+        
+        # Extract customer details with fallbacks
+        customer_details = session.get("customer_details", {})
+        print("Customer details from event:", customer_details)
+        
+        customer_email = customer_details.get("email")
+        customer_name = customer_details.get("name", "")
+        
+        if customer_name:
+            name_parts = customer_name.split(" ", 1)
+            first_name = name_parts[0]
+            last_name = name_parts[1] if len(name_parts) > 1 else ""
+        else:
+            first_name = last_name = None
+        
+        print("Customer details extracted:")
+        print(f"  Email: {customer_email}")
+        print(f"  First Name: {first_name}")
+        print(f"  Last Name: {last_name}")
+        
+        # Register the user if we have valid email and name
+        if customer_email and first_name:
+            try:
+                # Create a username from first and last name
+                username = f"{first_name.lower()}{last_name.lower() if last_name else ''}"
+                # Remove spaces and special characters
+                username = re.sub(r'[^a-zA-Z0-9]', '', username)
+                
+                print(f"Generated username: {username}")
+                
+                # Generate a random temporary password
+                import secrets
+                import string
+                temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                
+                print("Generated temporary password")
+                
+                # Get a database session
+                db = SessionLocal()
+                try:
+                    # Check if user with this email already exists
+                    existing_user = db.query(User).filter(User.email == customer_email).first()
+                    
+                    if existing_user:
+                        print(f"User with email {customer_email} already exists, skipping registration")
+                    else:
+                        print("Creating new user...")
+                        # Create new user
+                        hashed_password = get_password_hash(temp_password)
+                        new_user = User(
+                            username=username,
+                            email=customer_email,
+                            hashed_password=hashed_password,
+                            permissions="paid",  # Set to paid since they completed checkout
+                            query_limit=10  # Using maximum allowed by current constraint
+                        )
+                        db.add(new_user)
+                        db.commit()
+                        db.refresh(new_user)
+                        
+                        print(f"New user registered: {username} with email {customer_email}")
+                        print(f"Temporary password: {temp_password}")
+                        
+                        # TODO: Send email to user with their username and temporary password
+                        # This would normally involve calling an email service
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"Error registering user: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+        else:
+            print("Missing required user information, cannot register")
+            print(f"customer_email: {customer_email}, first_name: {first_name}")
+            
+            # Try alternative fields where the information might be
+            print("Looking for customer information in alternative fields...")
+            if "customer" in session:
+                print("Customer ID found:", session["customer"])
+                try:
+                    # Try to retrieve customer from Stripe API
+                    customer = stripe.Customer.retrieve(session["customer"])
+                    print("Retrieved customer from Stripe:", customer)
+                    
+                    # Try to extract email and name from customer object
+                    alt_email = customer.get("email")
+                    alt_name = customer.get("name", "")
+                    
+                    print(f"Alternative customer info - Email: {alt_email}, Name: {alt_name}")
+                    
+                    if alt_email and alt_name:
+                        # Attempt registration with alternative info
+                        print("Attempting registration with alternative customer info...")
+                        alt_name_parts = alt_name.split(" ", 1)
+                        alt_first_name = alt_name_parts[0]
+                        alt_last_name = alt_name_parts[1] if len(alt_name_parts) > 1 else ""
+                        
+                        # Create username from alternative name
+                        alt_username = f"{alt_first_name.lower()}{alt_last_name.lower() if alt_last_name else ''}"
+                        alt_username = re.sub(r'[^a-zA-Z0-9]', '', alt_username)
+                        
+                        # Generate password
+                        alt_temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                        
+                        # Register the user with alternative details
+                        alt_db = SessionLocal()
+                        try:
+                            alt_existing_user = alt_db.query(User).filter(User.email == alt_email).first()
+                            if alt_existing_user:
+                                print(f"User with email {alt_email} already exists, skipping registration")
+                            else:
+                                alt_hashed_password = get_password_hash(alt_temp_password)
+                                alt_new_user = User(
+                                    username=alt_username,
+                                    email=alt_email,
+                                    hashed_password=alt_hashed_password,
+                                    permissions="paid",
+                                    query_limit=10  # Using maximum allowed by current constraint
+                                )
+                                alt_db.add(alt_new_user)
+                                alt_db.commit()
+                                alt_db.refresh(alt_new_user)
+                                print(f"New user registered using alternative info: {alt_username} with email {alt_email}")
+                                print(f"Temporary password: {alt_temp_password}")
+                        finally:
+                            alt_db.close()
+                except Exception as e:
+                    print(f"Error processing alternative customer info: {str(e)}")
+    elif event["type"] == "customer.subscription.created":
+        subscription = event["data"]["object"]
+        # Handle subscription creation event
+        print("Subscription created:", subscription)
+    elif event["type"] == "invoice.payment_succeeded":
+        invoice = event["data"]["object"]
+        # Handle successful invoice payment
+        print("Payment succeeded:", invoice)
+    else:
+        # Log unhandled event types
+        print(f"Unhandled event type: {event['type']}")
+        print(f"Event data: {event['data']}")
+    
+    # Log all event types for analysis
+    print(f"Event type received: {event['type']}")
+    print("All event data:", event)
+
+    return {"status": "success"}
 
 @app.post("/register")
 def register_user(

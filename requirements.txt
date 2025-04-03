@@ -22,3 +22,4 @@ psycopg2-binary==2.9.9
 APScheduler==3.10.1
 requests==2.31.0
 pillow==10.1.0
+stripe==7.9.0
