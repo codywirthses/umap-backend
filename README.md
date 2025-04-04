@@ -102,6 +102,9 @@ PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
 ### Feedback Endpoints
 - `POST /api/feedback` - Save user feedback on responses
 
+### Database Query Endpoints
+- `GET /snowflake-query` - Query the Snowflake database with optional custom SQL query parameters
+
 ## Database
 
 The application uses PostgreSQL to store user information.
