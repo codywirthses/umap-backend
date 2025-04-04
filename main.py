@@ -39,7 +39,8 @@ from auth import (
     authenticate_user, 
     create_access_token, 
     get_current_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    verify_password
 )
 
 import stripe
@@ -800,6 +801,34 @@ async def snowflake_query(
             status_code=500,
             detail=f"Error connecting to Snowflake or executing query: {str(e)}"
         )
+
+@app.post("/reset-password")
+def reset_password(
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Allows a logged-in user to reset their password by providing their current password and a new password.
+    """
+    # Verify current password
+    if not verify_password(current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect"
+        )
+    
+    # Hash the new password
+    hashed_password = get_password_hash(new_password)
+    
+    # Update the user's password in the database
+    current_user.hashed_password = hashed_password
+    db.commit()
+    
+    return {
+        "message": "Password reset successfully"
+    }
 
 # --- Run the Combined Application ---
 if __name__ == "__main__":
