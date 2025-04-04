@@ -2,9 +2,10 @@ import os
 import re
 from io import BytesIO
 from datetime import timedelta, datetime
-from typing import Optional
+from typing import Optional, Any
 import asyncio
 import threading
+import json
 
 import httpx
 import uvicorn
@@ -15,6 +16,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
+import snowflake.connector
+from fastapi.encoders import jsonable_encoder
 
 # --- External LLM, Retrieval, and DB Clients (from first file) ---
 from huggingface_hub import login
@@ -280,6 +283,7 @@ allowed_origins = list(set([
     os.getenv("FRONTEND_URL", "http://localhost:3000"),
     os.getenv("CORS_ORIGIN", "http://localhost:3000")
 ]))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -703,6 +707,99 @@ async def get_molecule(smiles: str = Query(..., title="SMILES String")):
         return Response(content=img_bytes.getvalue(), media_type="image/png")
     except Exception as e:
         return {"error": str(e)}
+
+# Add this class after the imports section
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj: Any) -> Any:
+        import numpy as np
+        import pandas as pd
+        
+        if isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+        elif isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif pd.isna(obj):
+            return None
+        return super().default(obj)
+
+@app.get("/snowflake-query")
+async def snowflake_query(
+    custom_query: Optional[str] = Query(None, description="Optional custom SQL query to execute"),
+    limit: int = Query(10, description="Number of rows to return")
+):
+    try:
+        import pandas as pd
+        import numpy as np
+        
+        # Connect to Snowflake using environment variables
+        conn = snowflake.connector.connect(
+            account="SESAI-MAIN",
+            user=os.getenv("SNOWFLAKE_USER"),
+            password=os.getenv("SNOWFLAKE_PASSWORD", ""),  # Optional, if using password auth
+            authenticator=os.getenv("SNOWFLAKE_AUTHENTICATOR", "externalbrowser"),
+            role=os.getenv("SNOWFLAKE_ROLE"),
+            warehouse="MATERIAL_WH",
+            database="UMAP_DATA",
+            schema="PUBLIC"
+        )
+        
+        # Use the custom query if provided; otherwise, use the default table query
+        base_query = custom_query if custom_query else "SELECT * FROM UMAP_DATA.PUBLIC.UMAP_1M"
+        
+        # Append a LIMIT clause if one isn't already specified in the query
+        if "LIMIT" not in base_query.upper():
+            query = f"{base_query} LIMIT {limit}"
+        else:
+            query = base_query
+        
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Fetch the query results into a pandas DataFrame
+        df = cursor.fetch_pandas_all()
+        
+        # Clean up the connection
+        cursor.close()
+        conn.close()
+        
+        # Replace NaN and infinite values with None for JSON compatibility
+        df = df.replace([np.nan, np.inf, -np.inf], None)
+        
+        # Convert DataFrame to records list and handle serialization
+        data_records = df.replace({pd.NA: None}).to_dict(orient="records")
+        
+        # Clean the data further to ensure JSON compatibility
+        for record in data_records:
+            for key, value in record.items():
+                if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+                    record[key] = None
+                elif isinstance(value, (np.integer, np.floating, np.bool_)):
+                    record[key] = value.item()
+        
+        # Prepare the response payload
+        message = f"Retrieved {len(df)} rows from Snowflake."
+        
+        # Use jsonable_encoder to convert complex types before JSON serialization
+        response_data = {
+            "message": message,
+            "row_count": len(df),
+            "data": data_records
+        }
+        
+        # Return a standard dict which FastAPI will properly serialize
+        return response_data
+    
+    except Exception as e:
+        import traceback
+        error_detail = f"Error connecting to Snowflake or executing query: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error connecting to Snowflake or executing query: {str(e)}"
+        )
 
 # --- Run the Combined Application ---
 if __name__ == "__main__":

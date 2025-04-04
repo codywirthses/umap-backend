@@ -23,3 +23,6 @@ APScheduler==3.10.1
 requests==2.31.0
 pillow==10.1.0
 stripe==7.9.0
+snowflake-connector-python[pandas]==3.14.0
+snowflake-snowpark-python==1.29.1
+pandas==2.1.4
