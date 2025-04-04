@@ -43,7 +43,7 @@ from util import get_smiles, smiles_to_image, replace_greek_letters
 snowflake_auth = {
     "account": "SESAI-MAIN",
     "user": os.getenv("SNOWFLAKE_USER"),
-    "authenticator": "externalbrowser",
+    "password": os.getenv("SNOWFLAKE_PASSWORD"),
     "role": os.getenv("SNOWFLAKE_ROLE"),
     "warehouse": "MATERIAL_WH",
     "database": "UMAP_DATA",

@@ -163,26 +163,38 @@ async def retrieve_context(query, top_k_chunks, rag_enabled: bool, web_search_en
             "inputs": {
                 "text": f"{query}"
             },
-            "top_k": top_k_chunks
+            "top_k": 50
         }
-
-        results = index.search(
+        first_retrieval = index.search(
             namespace="ses_rag",
             query=query_payload
         )
-
-        for (i,hit) in enumerate(results['result']['hits']):
-            context_text = hit['fields']['context']
-            source_text = hit['fields']['source']
+        b4_rerank_contexts = []
+        for (i, hit) in enumerate(first_retrieval['result']['hits']):
+            b4_rerank_contexts.append({
+                "id": hit['fields']['source'],
+                "text": hit['fields']['context']
+            })
+        ## Re-rank system.
+        reranked_docs = pc.inference.rerank(
+            model="pinecone-rerank-v0",
+            query=query,
+            documents=b4_rerank_contexts,
+            top_n=top_k_chunks,
+            return_documents=True,
+            parameters={
+                "truncate": "END"
+            }
+        )
+        for i in range(len(reranked_docs.data)):
+            context_text = reranked_docs.data[i]['document']['text']
+            source_text = reranked_docs.data[i]['document']['id']
             citation = extract_title_doi_from_filename(source_text)
-
             if citation:
                 context += "Database result " + str(i+1) + ", from " + citation + ": " + context_text + f"\n\n"
             else:
                 context += "Database result " + str(i+1) + ": " + context_text + "\n\n"
-
             sources.append(f'{citation}')
-
     sources = list(dict.fromkeys(sources))
     sources = "\n".join(sources)
     return context, sources
