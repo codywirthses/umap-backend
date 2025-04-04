@@ -729,7 +729,7 @@ class CustomJSONEncoder(json.JSONEncoder):
 @app.get("/snowflake-query")
 async def snowflake_query(
     custom_query: Optional[str] = Query(None, description="Optional custom SQL query to execute"),
-    limit: int = Query(300000, description="Number of rows to return")
+    limit: int = Query(150000, description="Number of rows to return")
 ):
     try:
         import pandas as pd
