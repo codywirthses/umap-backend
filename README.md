@@ -75,6 +75,12 @@ OPENAI_API_KEY=your_openai_key      # OpenAI API key for o3-mini model
 HF_API_KEY=your_huggingface_key     # HuggingFace API key
 TAVILY_API_KEY=your_tavily_key      # Tavily API key for web search
 PINECONE_API_KEY=your_pinecone_key  # Pinecone API key for vector database
+
+# Snowflake Configuration
+SNOWFLAKE_USER="YOUR_USERNAME"      # Snowflake username
+SNOWFLAKE_PASSWORD=""               # Snowflake password (optional, not needed with externalbrowser auth)
+SNOWFLAKE_AUTHENTICATOR=externalbrowser  # Authentication method (externalbrowser, snowflake, etc.)
+SNOWFLAKE_ROLE=YOUR_ROLE            # Snowflake role for permissions
 ```
 
 ## API Endpoints
@@ -164,6 +170,43 @@ SELECT id, username, query_limit, created_at FROM users;
 # Delete a user
 DELETE FROM users WHERE username = 'your_username';
 ```
+
+## Snowflake Integration
+
+The application integrates with Snowflake for data querying. The Snowflake connection is configured with the following parameters:
+
+- **Account**: SESAI-MAIN
+- **User**: Configured via SNOWFLAKE_USER environment variable
+- **Authentication**: Default is externalbrowser (browser-based SSO)
+- **Role**: Configured via SNOWFLAKE_ROLE environment variable
+- **Warehouse**: MATERIAL_WH
+- **Database**: UMAP_DATA
+- **Schema**: PUBLIC
+
+### Querying Snowflake
+
+The API provides an endpoint to query Snowflake:
+
+- `GET /snowflake-query` - Query the Snowflake database
+  - Parameters:
+    - `custom_query` (optional): Custom SQL query to execute
+    - `limit` (default: 150000): Number of rows to return
+
+If no custom query is provided, the endpoint will execute the default query:
+```sql
+SELECT * FROM UMAP_DATA.PUBLIC.UMAP_1M LIMIT 150000
+```
+
+### Snowflake Setup
+
+1. Ensure you have access to the Snowflake instance
+2. Configure the Snowflake environment variables in your `.env` file:
+   ```
+   SNOWFLAKE_USER="YOUR_USERNAME"
+   SNOWFLAKE_ROLE=YOUR_ROLE
+   SNOWFLAKE_AUTHENTICATOR=externalbrowser
+   ```
+3. When using externalbrowser authentication, a browser window will open for authentication when the application connects to Snowflake
 
 ## Permission Levels
 
