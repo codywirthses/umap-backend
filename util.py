@@ -37,11 +37,12 @@ def replace_greek_letters(molecule: str) -> str:
     return molecule
 
 async def get_smiles(molecule: str) -> dict:
-    molecule = unicodedata.normalize('NFC', molecule).replace('\u2013', '-').replace('\u2014', '-').replace('\u2010', '-')
+    molecule = unicodedata.normalize('NFC', molecule).replace('\u2013', '-').replace('\u2014', '-').replace('\u2010', '-').replace('\u2011', '-')
+    print(f"Searching for {molecule}...")
     try:
         compounds = pcp.get_compounds(molecule, 'name')
         if compounds:
-            smiles = compounds[0].canonical_smiles
+            smiles = Chem.CanonSmiles(compounds[0].canonical_smiles)
             return {"molecule": molecule, "smiles": smiles}
         else:
             return {"molecule": molecule, "smiles": "Not found"}
